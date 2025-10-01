@@ -293,10 +293,8 @@ async fn test_metrics_with_mock_model() {
 mod integration_tests {
     use super::*;
     use dynamo_llm::{
-        discovery::{MODEL_ROOT_PATH, ModelEntry, ModelWatcher},
-        engines::make_echo_engine,
-        entrypoint::EngineConfig,
-        local_model::LocalModelBuilder,
+        discovery::ModelWatcher, engines::make_echo_engine, entrypoint::EngineConfig,
+        local_model::LocalModelBuilder, model_card,
     };
     use dynamo_runtime::DistributedRuntime;
     use dynamo_runtime::pipeline::RouterMode;
@@ -348,7 +346,7 @@ mod integration_tests {
         // Start watching etcd for model registrations
         if let Some(etcd_client) = distributed_runtime.etcd_client() {
             let models_watcher = etcd_client
-                .kv_get_and_watch_prefix(MODEL_ROOT_PATH)
+                .kv_get_and_watch_prefix(model_card::ROOT_PATH)
                 .await
                 .unwrap();
             let (_prefix, _watcher, receiver) = models_watcher.dissolve();
@@ -376,7 +374,7 @@ mod integration_tests {
         let test_component = namespace.component("test-mdc-component").unwrap();
         let test_endpoint = test_component.endpoint("test-mdc-endpoint");
 
-        // This will store the MDC in etcd and create the ModelEntry for discovery
+        // This will store the MDC in etcd for discovery
         local_model
             .attach(
                 &test_endpoint,
@@ -500,71 +498,11 @@ mod integration_tests {
         assert!(metrics_body.contains("request_type=\"stream\""));
         assert!(metrics_body.contains("status=\"success\""));
 
+        // etcd lease will ensure we everything is deleted from etcd
+
         // Now test the complete lifecycle: remove the model from etcd
+        // We don't need to cleanup model manager because it's local to this test
 
-        // Remove the model using the cleaner ModelWatcher approach
-        if let Some(etcd_client) = distributed_runtime.etcd_client() {
-            // Use ModelWatcher to find and remove the model (following ModelWatcher::handle_delete pattern)
-            let watcher = ModelWatcher::new(
-                distributed_runtime.clone(),
-                service.state().manager_clone(),
-                RouterMode::RoundRobin,
-                None,
-                None,
-            );
-
-            // Get all model entries for our test model
-            let model_entries = watcher.entries_for_model("test-mdc-model").await.unwrap();
-
-            if !model_entries.is_empty() {
-                // For each model entry, we need to find its etcd key and remove it
-                // This follows the same pattern as ModelWatcher::handle_delete
-                for model_entry in model_entries {
-                    // Find the etcd key for this specific model entry
-                    // etcd keys follow pattern: "models/{UUID}"
-                    // Example: "models/11dff335-316d-4c9f-8229-88ad8e8dac5e"
-                    let kvs = etcd_client.kv_get_prefix("models").await.unwrap();
-
-                    // Find the key by matching ModelEntry JSON structure:
-                    // {
-                    //   "name": "test-mdc-model",
-                    //   "endpoint": { "namespace": "...", "component": "...", "name": "..." },
-                    //   "model_type": "Chat",
-                    //   "runtime_config": { ... },
-                    //   "model_input": "Text"
-                    // }
-                    let key = kvs
-                        .iter()
-                        .find(|kv| {
-                            serde_json::from_slice::<ModelEntry>(kv.value())
-                                .map(|entry| {
-                                    entry.name == model_entry.name
-                                        && entry.endpoint_id == model_entry.endpoint_id
-                                })
-                                .unwrap_or(false)
-                        })
-                        .map(|kv| kv.key_str().unwrap().to_string());
-
-                    if let Some(key) = key {
-                        // Remove from ModelManager first (this returns the ModelEntry)
-                        if let Some(_removed_card) = manager.remove_model_card(&key) {
-                            // Remove engines (following ModelWatcher::handle_delete pattern)
-                            manager
-                                .remove_chat_completions_model(&model_entry.name)
-                                .ok();
-                            manager.remove_completions_model(&model_entry.name).ok();
-                            manager.remove_embeddings_model(&model_entry.name).ok();
-                            manager.remove_tensor_model(&model_entry.name).ok();
-
-                            // Then delete from etcd
-                            etcd_client.kv_delete(key.as_str(), None).await.unwrap();
-                        }
-                    }
-                }
-            }
-        }
-
-        // Clean up
         cancel_token.cancel();
         task.await.unwrap().unwrap();
     }
