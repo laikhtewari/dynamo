@@ -728,9 +728,38 @@ impl Endpoint {
             .unwrap_or(0)
     }
 
-    /// Register Python DynamoMetric objects with the Endpoint's Prometheus registry
+    /// Register Python DynamoPromMetric objects with the Endpoint's Prometheus registry
+    ///
+    /// TODO: Enable Rust-side updates
+    /// Currently, Python can create metrics via `prom_metric()` and update them via `.set()`,
+    /// but Rust code has no way to retrieve and update these same metrics.
+    ///
+    /// To enable Rust to update these metrics:
+    /// 1. Add a field to DistributedRuntime to store Python-registered metrics:
+    ///    `python_metrics: Arc<RwLock<HashMap<String, Arc<RwLock<HashMap<String, PrometheusGauge>>>>>>`
+    ///    This maps: hierarchy -> (metric_name -> PrometheusGauge)
+    ///
+    /// 2. Add methods to DistributedRuntime:
+    ///    - `register_python_metric(&self, hierarchy: &str, metric_name: String, gauge: PrometheusGauge)`
+    ///    - `get_python_metric(&self, hierarchy: &str, metric_name: &str) -> Option<PrometheusGauge>`
+    ///    - `get_python_metrics_for_hierarchy(&self, hierarchy: &str) -> Option<HashMap<String, PrometheusGauge>>`
+    ///
+    /// 3. In this function, after creating each gauge, store it in the DRT:
+    ///    ```
+    ///    let hierarchy = endpoint.hierarchy();
+    ///    endpoint.drt().register_python_metric(&hierarchy, name.clone(), gauge.clone());
+    ///    ```
+    ///
+    /// 4. Make PrometheusGauge public in lib/bindings/python/rust/metrics.rs
+    ///
+    /// 5. Rust code can then retrieve and update metrics:
+    ///    ```
+    ///    if let Some(gauge) = endpoint.drt().get_python_metric(&hierarchy, "request_total_slots") {
+    ///        gauge.set(2048.0, None).unwrap();
+    ///    }
+    ///    ```
     fn register_metrics(&self, metrics: Vec<PyObject>, py: Python) -> PyResult<()> {
-        use crate::metrics::DynamoMetric;
+        use crate::metrics::DynamoPromMetric;
         use rs::metrics::MetricsRegistry;
 
         let endpoint = &self.inner;
@@ -738,7 +767,7 @@ impl Endpoint {
         tracing::info!("Registering {} metrics with endpoint", metrics.len());
 
         for metric_py in metrics {
-            let metric: PyRef<DynamoMetric> = metric_py.extract(py)?;
+            let metric: PyRef<DynamoPromMetric> = metric_py.extract(py)?;
 
             let name = metric.name();
             let metric_type = metric.metric_type();
@@ -792,21 +821,32 @@ impl Endpoint {
         use rs::metrics::MetricsRegistry;
 
         let endpoint = &self.inner;
+        let basename = endpoint.basename();
+        let parent_hierarchy = endpoint.parent_hierarchy();
+        let hierarchy = endpoint.hierarchy();
+
+        println!("[register_metrics_callback] basename: {}", basename);
+        println!("[register_metrics_callback] parent_hierarchy: {:?}", parent_hierarchy);
+        println!("[register_metrics_callback] Registering callback for hierarchy: {}", hierarchy);
 
         // Store the callback in the DRT's metrics callback registry using endpoint's hierarchy
         endpoint.drt().register_metrics_callback(
-            vec![endpoint.hierarchy()],
+            vec![hierarchy.clone()],
             Arc::new(move || {
+                println!("[metrics_callback] Executing Python callback for hierarchy: {}", hierarchy);
                 // Execute the Python callback in the Python event loop
                 Python::with_gil(|py| {
                     if let Err(e) = callback.call0(py) {
                         tracing::error!("Metrics callback failed: {}", e);
+                    } else {
+                        println!("[metrics_callback] Python callback executed successfully");
                     }
                 });
                 Ok(())
             })
         );
 
+        println!("[register_metrics_callback] Callback registered successfully");
         Ok(())
     }
 }

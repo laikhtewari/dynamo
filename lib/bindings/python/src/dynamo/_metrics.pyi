@@ -3,7 +3,7 @@
 
 from typing import Dict, List, Optional
 
-class DynamoMetric:
+class DynamoPromMetric:
     """
     Python wrapper around Prometheus gauges in Rust.
 
@@ -21,7 +21,7 @@ class DynamoMetric:
         labels: Optional[Dict[str, str]] = None,
     ) -> None:
         """
-        Create a new DynamoMetric.
+        Create a new DynamoPromMetric.
 
         Args:
             name: The metric name
@@ -80,30 +80,30 @@ class DynamoMetric:
         """
         ...
 
-    def with_labels(self, labels: Dict[str, str]) -> DynamoMetric:
+    def with_labels(self, labels: Dict[str, str]) -> DynamoPromMetric:
         """
-        Create a new DynamoMetric instance with bound labels for vector metrics.
+        Create a new DynamoPromMetric instance with bound labels for vector metrics.
 
         Args:
             labels: Dict of label values to bind
 
         Returns:
-            A new DynamoMetric instance with labels set
+            A new DynamoPromMetric instance with labels set
 
         Raises:
             ValueError: If this is not a vector metric
         """
         ...
 
-def dynamo_metric(
+def prom_metric(
     name: str,
     metric_type: str,
     initial_value: Optional[float] = None,
     label_names: Optional[List[str]] = None,
     labels: Optional[Dict[str, str]] = None,
-) -> DynamoMetric:
+) -> DynamoPromMetric:
     """
-    Create a DynamoMetric wrapper around Prometheus gauges.
+    Create a DynamoPromMetric wrapper around Prometheus gauges.
 
     This is the main API for creating declarative metrics in Python.
     Supports Gauge, IntGauge, GaugeVec, and IntGaugeVec.
@@ -111,11 +111,11 @@ def dynamo_metric(
     Example:
         ```python
         # Simple metrics (Gauge/IntGauge)
-        request_total_slots = dynamo_metric("request_total_slots", "int", 2048)
-        gpu_cache_usage = dynamo_metric("gpu_cache_usage_percent", "float", 0.0)
+        request_total_slots = prom_metric("request_total_slots", "int", 2048)
+        gpu_cache_usage = prom_metric("gpu_cache_usage_percent", "float", 0.0)
 
         # Vector metrics (GaugeVec/IntGaugeVec)
-        worker_requests = dynamo_metric(
+        worker_requests = prom_metric(
             "worker_active_requests",
             "int",
             label_names=["worker_id", "model"]
@@ -141,6 +141,6 @@ def dynamo_metric(
         labels: Optional dict of label values (for setting vector metrics)
 
     Returns:
-        A DynamoMetric object that can be registered with an endpoint
+        A DynamoPromMetric object that can be registered with an endpoint
     """
     ...

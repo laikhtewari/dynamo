@@ -20,7 +20,7 @@ from typing import (
 )
 
 # Import from specialized modules
-from ._metrics import DynamoMetric, dynamo_metric
+from ._metrics import DynamoPromMetric, prom_metric
 from ._prometheus_names import prometheus_names
 
 def log_message(level: str, message: str, module: str, file: str, line: int) -> None:
@@ -149,16 +149,16 @@ class Endpoint:
         """
         ...
 
-    def register_metrics(self, metrics: List[DynamoMetric]) -> None:
+    def register_metrics(self, metrics: List[DynamoPromMetric]) -> None:
         """
-        Register Python DynamoMetric objects with the Component's Prometheus registry.
+        Register Python DynamoPromMetric objects with the Component's Prometheus registry.
 
         This creates actual Prometheus gauges in Rust and connects them to the Python wrappers.
         Supports Gauge, IntGauge, GaugeVec, and IntGaugeVec types.
         The metrics will be automatically served via the /metrics endpoint.
 
         Args:
-            metrics: List of DynamoMetric objects to register
+            metrics: List of DynamoPromMetric objects to register
         """
         ...
 
@@ -1425,5 +1425,5 @@ class VirtualConnectorClient:
 __all__ = [
     # ... existing exports ...
     "prometheus_names",
-    "dynamo_metric"
+    "prom_metric"
 ]

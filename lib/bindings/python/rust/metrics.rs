@@ -73,7 +73,7 @@ impl PrometheusGauge {
 /// Python wrapper around Prometheus gauges in Rust
 /// Supports Gauge, IntGauge, GaugeVec, and IntGaugeVec
 #[pyclass]
-pub struct DynamoMetric {
+pub struct DynamoPromMetric {
     name: String,
     metric_type: String, // "int" or "float"
     is_vec: bool,        // Whether this is a GaugeVec
@@ -83,8 +83,8 @@ pub struct DynamoMetric {
 }
 
 #[pymethods]
-impl DynamoMetric {
-    /// Create a new DynamoMetric (does not register with Prometheus yet)
+impl DynamoPromMetric {
+    /// Create a new DynamoPromMetric (does not register with Prometheus yet)
     #[new]
     #[pyo3(signature = (name, metric_type, initial_value=None, label_names=None, labels=None))]
     fn new(
@@ -211,16 +211,16 @@ impl DynamoMetric {
     fn __repr__(&self) -> String {
         if self.is_vec {
             format!(
-                "DynamoMetric('{}', type={}, vec=true, label_names={:?})",
+                "DynamoPromMetric('{}', type={}, vec=true, label_names={:?})",
                 self.name, self.metric_type, self.label_names
             )
         } else {
-            format!("DynamoMetric('{}', type={})", self.name, self.metric_type)
+            format!("DynamoPromMetric('{}', type={})", self.name, self.metric_type)
         }
     }
 }
 
-impl DynamoMetric {
+impl DynamoPromMetric {
     /// Internal method to set the actual Prometheus gauge (called during registration)
     pub(crate) fn set_gauge(&self, gauge: PrometheusGauge) {
         let mut gauge_opt = self.gauge.lock().unwrap();
@@ -248,22 +248,22 @@ impl DynamoMetric {
     }
 }
 
-/// Helper function to create a DynamoMetric - this is the main API function
+/// Helper function to create a DynamoPromMetric - this is the main API function
 #[pyfunction]
 #[pyo3(signature = (name, metric_type, initial_value=None, label_names=None, labels=None))]
-pub fn dynamo_metric(
+pub fn prom_metric(
     name: String,
     metric_type: String,
     initial_value: Option<f64>,
     label_names: Option<Vec<String>>,
     labels: Option<HashMap<String, String>>,
-) -> PyResult<DynamoMetric> {
-    DynamoMetric::new(name, metric_type, initial_value, label_names, labels)
+) -> PyResult<DynamoPromMetric> {
+    DynamoPromMetric::new(name, metric_type, initial_value, label_names, labels)
 }
 
 /// Add metrics bindings to the Python module
 pub fn add_to_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<DynamoMetric>()?;
-    m.add_function(wrap_pyfunction!(dynamo_metric, m)?)?;
+    m.add_class::<DynamoPromMetric>()?;
+    m.add_function(wrap_pyfunction!(prom_metric, m)?)?;
     Ok(())
 }
