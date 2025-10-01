@@ -1,0 +1,19 @@
+tensor_parallel_size: 8
+moe_expert_parallel_size: 1
+enable_attention_dp: false
+max_num_tokens: 8192
+max_seq_len: 257000
+max_input_len: 256000
+max_batch_size: 1
+trust_remote_code: true
+backend: pytorch
+enable_chunked_prefill: true
+
+cuda_graph_config:
+  max_batch_size: 1
+
+kv_cache_config:
+  free_gpu_memory_fraction: 0.3
+
+cache_transceiver_config:
+  backend: DEFAULT
