@@ -1,6 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# =============================================================================
+# ORGANIZATION NOTE:
+# =============================================================================
+# This file contains the core Dynamo runtime types and functions.
+# For better organization, related functionality is split into separate modules.
+# =============================================================================
+
 from typing import (
     Any,
     AsyncGenerator,
@@ -12,7 +19,8 @@ from typing import (
     Tuple,
 )
 
-# Prometheus metric names are defined in a separate module
+# Import from specialized modules
+from ._metrics import DynamoMetric, dynamo_metric
 from ._prometheus_names import prometheus_names
 
 def log_message(level: str, message: str, module: str, file: str, line: int) -> None:
@@ -96,7 +104,7 @@ class Component:
 
     ...
 
-    def create_service(self) -> None:
+    async def create_service(self) -> None:
         """
         Create a service
         """
@@ -138,6 +146,41 @@ class Endpoint:
     async def lease_id(self) -> int:
         """
         Return primary lease id. Currently, cannot set a different lease id.
+        """
+        ...
+
+    def register_metrics(self, metrics: List[DynamoMetric]) -> None:
+        """
+        Register Python DynamoMetric objects with the Component's Prometheus registry.
+
+        This creates actual Prometheus gauges in Rust and connects them to the Python wrappers.
+        Supports Gauge, IntGauge, GaugeVec, and IntGaugeVec types.
+        The metrics will be automatically served via the /metrics endpoint.
+
+        Args:
+            metrics: List of DynamoMetric objects to register
+        """
+        ...
+
+    def register_metrics_callback(self, callback: Callable[[], None]) -> None:
+        """
+        Register a Python callback to be invoked before metrics are scraped.
+
+        This allows you to update metric values dynamically when the /metrics endpoint
+        is accessed. The callback will be executed synchronously before serving metrics.
+
+        Args:
+            callback: A callable that takes no arguments and returns None.
+                     This function should update metric values as needed.
+
+        Example:
+            ```python
+            def update_metrics():
+                gpu_cache_usage.set(get_current_cache_usage())
+                active_requests.set(get_active_request_count())
+
+            endpoint.register_metrics_callback(update_metrics)
+            ```
         """
         ...
 
@@ -1381,5 +1424,6 @@ class VirtualConnectorClient:
 
 __all__ = [
     # ... existing exports ...
-    "prometheus_names"
+    "prometheus_names",
+    "dynamo_metric"
 ]

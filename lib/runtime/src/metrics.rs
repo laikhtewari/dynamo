@@ -113,6 +113,21 @@ impl PrometheusMetric for prometheus::IntGauge {
     }
 }
 
+impl PrometheusMetric for prometheus::GaugeVec {
+    fn with_opts(_opts: prometheus::Opts) -> Result<Self, prometheus::Error> {
+        Err(prometheus::Error::Msg(
+            "GaugeVec requires label names, use with_opts_and_label_names instead".to_string(),
+        ))
+    }
+
+    fn with_opts_and_label_names(
+        opts: prometheus::Opts,
+        label_names: &[&str],
+    ) -> Result<Self, prometheus::Error> {
+        prometheus::GaugeVec::new(opts, label_names)
+    }
+}
+
 impl PrometheusMetric for prometheus::IntGaugeVec {
     fn with_opts(_opts: prometheus::Opts) -> Result<Self, prometheus::Error> {
         Err(prometheus::Error::Msg(
@@ -482,6 +497,24 @@ pub trait MetricsRegistry: Send + Sync + DistributedRuntimeProvider {
         labels: &[(&str, &str)],
     ) -> anyhow::Result<prometheus::IntGauge> {
         create_metric(self, name, description, labels, None, None)
+    }
+
+    /// Create a GaugeVec metric with label names (for dynamic labels)
+    fn create_gaugevec(
+        &self,
+        name: &str,
+        description: &str,
+        const_labels: &[&str],
+        const_label_values: &[(&str, &str)],
+    ) -> anyhow::Result<prometheus::GaugeVec> {
+        create_metric(
+            self,
+            name,
+            description,
+            const_label_values,
+            None,
+            Some(const_labels),
+        )
     }
 
     /// Create an IntGaugeVec metric with label names (for dynamic labels)

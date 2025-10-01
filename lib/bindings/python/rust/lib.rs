@@ -53,6 +53,7 @@ mod context;
 mod engine;
 mod http;
 mod llm;
+mod metrics;
 mod parsers;
 mod planner;
 mod prometheus_names;
@@ -134,6 +135,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(register_llm, m)?)?;
     m.add_function(wrap_pyfunction!(llm::entrypoint::make_engine, m)?)?;
     m.add_function(wrap_pyfunction!(llm::entrypoint::run_input, m)?)?;
+
+    // Add metrics module
+    metrics::add_to_module(m)?;
 
     m.add_class::<DistributedRuntime>()?;
     m.add_class::<CancellationToken>()?;
@@ -722,6 +726,88 @@ impl Endpoint {
             .primary_lease()
             .map(|l| l.id())
             .unwrap_or(0)
+    }
+
+    /// Register Python DynamoMetric objects with the Endpoint's Prometheus registry
+    fn register_metrics(&self, metrics: Vec<PyObject>, py: Python) -> PyResult<()> {
+        use crate::metrics::DynamoMetric;
+        use rs::metrics::MetricsRegistry;
+
+        let endpoint = &self.inner;
+
+        tracing::info!("Registering {} metrics with endpoint", metrics.len());
+
+        for metric_py in metrics {
+            let metric: PyRef<DynamoMetric> = metric_py.extract(py)?;
+
+            let name = metric.name();
+            let metric_type = metric.metric_type();
+            let is_vec = metric.is_vec();
+            let label_names = metric.label_names();
+
+            tracing::debug!("Registering metric: {} (type: {}, vec: {})", name, metric_type, is_vec);
+
+            // Create the appropriate Prometheus gauge type using the endpoint's registry
+            if is_vec {
+                // GaugeVec or IntGaugeVec
+                let label_names_ref = label_names.ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Vector metric missing label_names")
+                })?;
+                let label_strs: Vec<&str> = label_names_ref.iter().map(|s| s.as_str()).collect();
+
+                if metric_type == "int" {
+                    let gauge_vec = endpoint
+                        .create_intgaugevec(&name, &format!("Python-registered int gauge vector"), &label_strs, &[])
+                        .map_err(to_pyerr)?;
+                    metric.set_prometheus_intgaugevec(gauge_vec);
+                } else {
+                    let gauge_vec = endpoint
+                        .create_gaugevec(&name, &format!("Python-registered gauge vector"), &label_strs, &[])
+                        .map_err(to_pyerr)?;
+                    metric.set_prometheus_gaugevec(gauge_vec);
+                }
+            } else {
+                // Regular Gauge or IntGauge
+                if metric_type == "int" {
+                    let gauge = endpoint
+                        .create_intgauge(&name, &format!("Python-registered int gauge"), &[])
+                        .map_err(to_pyerr)?;
+                    metric.set_prometheus_intgauge(gauge);
+                } else {
+                    let gauge = endpoint
+                        .create_gauge(&name, &format!("Python-registered gauge"), &[])
+                        .map_err(to_pyerr)?;
+                    metric.set_prometheus_gauge(gauge);
+                }
+            }
+
+            tracing::info!("Successfully registered metric: {}", name);
+        }
+
+        Ok(())
+    }
+
+    /// Register a Python callback to be invoked before metrics are scraped
+    fn register_metrics_callback(&self, callback: PyObject, _py: Python) -> PyResult<()> {
+        use rs::metrics::MetricsRegistry;
+
+        let endpoint = &self.inner;
+
+        // Store the callback in the DRT's metrics callback registry using endpoint's hierarchy
+        endpoint.drt().register_metrics_callback(
+            vec![endpoint.hierarchy()],
+            Arc::new(move || {
+                // Execute the Python callback in the Python event loop
+                Python::with_gil(|py| {
+                    if let Err(e) = callback.call0(py) {
+                        tracing::error!("Metrics callback failed: {}", e);
+                    }
+                });
+                Ok(())
+            })
+        );
+
+        Ok(())
     }
 }
 
