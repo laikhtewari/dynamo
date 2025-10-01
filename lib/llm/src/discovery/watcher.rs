@@ -14,7 +14,7 @@ use dynamo_runtime::{
         network::egress::push_router::PushRouter,
     },
     protocols::{EndpointId, annotated::Annotated},
-    transports::etcd::{KeyValue, WatchEvent},
+    transports::etcd::WatchEvent,
 };
 
 use crate::{
@@ -147,6 +147,19 @@ impl ModelWatcher {
                         continue;
                     }
 
+                    // If we already have a worker for this model, and the ModelDeploymentCard
+                    // cards don't match, alert, and stop serving it.
+                    if !self.manager.is_valid_checksum(card.name(), &card.mdcsum()) {
+                        tracing::error!(
+                            model_name = card.name(),
+                            "Checksum for new model does not match existing model. Removing existing and discarding new."
+                        );
+                        if let Err(err) = self.delete_model(card.name()).await {
+                            tracing::error!(%err, model_name=card.name(), "Error removing corrupted model");
+                        }
+                        continue;
+                    }
+
                     match self.handle_put(key, &endpoint_id, &mut card).await {
                         Ok(()) => {
                             tracing::info!(
@@ -158,33 +171,38 @@ impl ModelWatcher {
                         }
                         Err(err) => {
                             tracing::error!(
+                                model_name = card.name(),
+                                namespace = endpoint_id.namespace,
                                 error = format!("{err:#}"),
-                                "error adding model {} from namespace {}",
-                                card.name(),
-                                endpoint_id.namespace,
+                                "Error adding model from discovery",
                             );
                         }
                     }
                 }
-                WatchEvent::Delete(kv) => match self.handle_delete(&kv).await {
-                    Ok(Some(model_name)) => {
-                        tracing::info!(model_name, "removed model");
+                WatchEvent::Delete(kv) => {
+                    let Ok(deleted_key) = kv.key_str() else {
+                        tracing::warn!("Invalid UTF-8 in etcd delete notification key: {kv:?}");
+                        continue;
+                    };
+                    match self.handle_delete(deleted_key).await {
+                        Ok(Some(model_name)) => {
+                            tracing::info!(model_name, "removed model");
+                        }
+                        Ok(None) => {
+                            // There are other instances running this model, nothing to do
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "error removing model");
+                        }
                     }
-                    Ok(None) => {
-                        // There are other instances running this model, nothing to do
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "error removing model");
-                    }
-                },
+                }
             }
         }
     }
 
     /// If the last instance running this model has gone delete it.
     /// Returns the name of the model we just deleted, if any.
-    async fn handle_delete(&self, kv: &KeyValue) -> anyhow::Result<Option<String>> {
-        let key = kv.key_str()?;
+    async fn handle_delete(&self, key: &str) -> anyhow::Result<Option<String>> {
         let card = match self.manager.remove_model_card(key) {
             Some(card) => card,
             None => {
@@ -269,7 +287,7 @@ impl ModelWatcher {
             .component(&endpoint_id.component)?;
         let client = component.endpoint(&endpoint_id.name).client().await?;
         tracing::debug!(model_name = card.name(), "adding model");
-        self.manager.save_model_card(key, card.clone());
+        self.manager.save_model_card(key, card.clone())?;
 
         if self.manager.has_model_any(card.name()) {
             tracing::trace!(
@@ -436,6 +454,19 @@ impl ModelWatcher {
                 card.model_type,
                 card.model_input.as_str()
             );
+        }
+
+        Ok(())
+    }
+
+    /// Stop serving this model
+    async fn delete_model(&self, model_name: &str) -> anyhow::Result<()> {
+        for (key, card) in self.manager.cards_by_key().into_iter() {
+            if card.name() != model_name {
+                continue;
+            }
+            // When we call this for the last instance, the HTTP server will stop serving the model
+            self.handle_delete(&key).await?;
         }
 
         Ok(())

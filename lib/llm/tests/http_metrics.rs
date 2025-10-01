@@ -387,7 +387,7 @@ mod integration_tests {
         // Manually save the model card and update metrics
         // This simulates what the ModelWatcher polling task would do in production
         let card = local_model.card().clone();
-        manager.save_model_card("test-mdc-key", card.clone());
+        let _ = manager.save_model_card("test-mdc-key", card.clone());
 
         if let Err(e) = service
             .state()

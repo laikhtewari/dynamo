@@ -286,7 +286,7 @@ pub mod kserve_test {
         let mut card = ModelDeploymentCard::with_name_only("split");
         card.model_type = ModelType::Completions;
         card.model_input = ModelInput::Text;
-        manager.save_model_card("split", card);
+        let _ = manager.save_model_card("split", card);
 
         manager
             .add_chat_completions_model("failure", failure.clone())
@@ -297,14 +297,14 @@ pub mod kserve_test {
         let mut card = ModelDeploymentCard::with_name_only("failure");
         card.model_type = ModelType::Completions | ModelType::Chat;
         card.model_input = ModelInput::Text;
-        manager.save_model_card("failure", card);
+        let _ = manager.save_model_card("failure", card);
         manager
             .add_completions_model("long_running", long_running.clone())
             .unwrap();
         let mut card = ModelDeploymentCard::with_name_only("long_running");
         card.model_type = ModelType::Completions;
         card.model_input = ModelInput::Text;
-        manager.save_model_card("long_running", card);
+        let _ = manager.save_model_card("long_running", card);
 
         (service, split, failure, long_running)
     }
@@ -1151,7 +1151,7 @@ pub mod kserve_test {
         let mut card = ModelDeploymentCard::with_name_only("tensor");
         card.model_type = ModelType::TensorBased;
         card.model_input = ModelInput::Tensor;
-        service_with_engines
+        let _ = service_with_engines
             .0
             .model_manager()
             .save_model_card("key", card);
@@ -1217,7 +1217,7 @@ pub mod kserve_test {
             }),
             ..Default::default()
         };
-        service_with_engines
+        let _ = service_with_engines
             .0
             .model_manager()
             .save_model_card("key", card);

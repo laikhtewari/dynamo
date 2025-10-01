@@ -39,8 +39,9 @@ pub struct ModelManager {
     embeddings_engines: RwLock<ModelEngines<OpenAIEmbeddingsStreamingEngine>>,
     tensor_engines: RwLock<ModelEngines<TensorStreamingEngine>>,
 
-    // These two are Mutex because we read and write rarely and equally
+    // These are Mutex because we read and write rarely and equally
     cards: Mutex<HashMap<String, ModelDeploymentCard>>,
+    card_checksums: Mutex<HashMap<String, String>>, // ModelDeploymentCard::mdcsum()
     kv_choosers: Mutex<HashMap<String, Arc<KvRouter>>>,
 }
 
@@ -58,8 +59,19 @@ impl ModelManager {
             embeddings_engines: RwLock::new(ModelEngines::default()),
             tensor_engines: RwLock::new(ModelEngines::default()),
             cards: Mutex::new(HashMap::new()),
+            card_checksums: Mutex::new(HashMap::new()),
             kv_choosers: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Does the model stored under model_name have the given checksum?
+    /// If there is no such model we return true.
+    pub fn is_valid_checksum(&self, model_name: &str, candidate_checksum: &str) -> bool {
+        self.card_checksums
+            .lock()
+            .get(model_name)
+            .map(|valid_checksum| valid_checksum.as_str() == candidate_checksum)
+            .unwrap_or(true)
     }
 
     pub fn get_model_cards(&self) -> Vec<ModelDeploymentCard> {
@@ -196,15 +208,35 @@ impl ModelManager {
             .ok_or(ModelManagerError::ModelNotFound(model.to_string()))
     }
 
-    /// Save a ModelDeploymentCard from an instance's etcd `models/` key so we can fetch it later when the key is
-    /// deleted from etcd.
-    pub fn save_model_card(&self, key: &str, entry: ModelDeploymentCard) {
-        self.cards.lock().insert(key.to_string(), entry);
+    /// Save a ModelDeploymentCard from an instance's ModelDeploymentCard key so we can fetch it later when the key is
+    /// deleted.
+    pub fn save_model_card(&self, key: &str, card: ModelDeploymentCard) -> anyhow::Result<()> {
+        let checksum = card.mdcsum();
+        if !self.is_valid_checksum(card.name(), &checksum) {
+            anyhow::bail!("Invalid ModelDeploymentCard checksum");
+        };
+        self.card_checksums.lock().insert(key.to_string(), checksum);
+        self.cards.lock().insert(key.to_string(), card);
+        Ok(())
     }
 
     /// Remove and return model card for this instance's etcd key. We do this when the instance stops.
     pub fn remove_model_card(&self, key: &str) -> Option<ModelDeploymentCard> {
-        self.cards.lock().remove(key)
+        let mut cards_lock = self.cards.lock();
+        let removed_card = cards_lock.remove(key)?;
+
+        let mut was_last = true;
+        for remaining in cards_lock.values() {
+            if remaining.name() == removed_card.name() {
+                was_last = false;
+                break;
+            }
+        }
+        drop(cards_lock);
+        if was_last {
+            let _ = self.card_checksums.lock().remove(removed_card.name());
+        }
+        Some(removed_card)
     }
 
     pub async fn kv_chooser_for(
@@ -284,6 +316,11 @@ impl ModelManager {
         let reasoning_parser = None; // TODO: Implement reasoning parser
 
         crate::protocols::openai::ParsingOptions::new(tool_call_parser, reasoning_parser)
+    }
+
+    // One entry per instance, all the instance keys and their matching ModelDeploymentCard.
+    pub fn cards_by_key(&self) -> HashMap<String, ModelDeploymentCard> {
+        self.cards.lock().clone()
     }
 }
 
