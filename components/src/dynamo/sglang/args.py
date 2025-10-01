@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 from sglang.srt.server_args import ServerArgs
 
 from dynamo._core import get_reasoning_parser_names, get_tool_parser_names
+from dynamo.common.config_dump import register_encoder
 from dynamo.runtime.logging import configure_dynamo_logging
 from dynamo.sglang import __version__
 
@@ -61,6 +62,12 @@ DYNAMO_ARGS: Dict[str, Dict[str, Any]] = {
         "default": False,
         "help": "Use SGLang's tokenizer. This will skip tokenization of the input and output and only v1/chat/completions will be available when using the dynamo frontend. Cannot be used with --custom-jinja-template.",
     },
+    "dump-config-to": {
+        "flags": ["--dump-config-to"],
+        "type": str,
+        "default": None,
+        "help": "Dump debug config to the specified file path. If not specified, the config will be dumped to stdout at INFO level.",
+    },
 }
 
 
@@ -78,6 +85,7 @@ class DynamoArgs:
 
     # preprocessing options
     use_sglang_tokenizer: bool = False
+    dump_config_to: Optional[str] = None
 
 
 class DisaggregationMode(Enum):
@@ -99,6 +107,20 @@ class Config:
             return DisaggregationMode.PREFILL
         elif self.server_args.disaggregation_mode == "decode":
             return DisaggregationMode.DECODE
+
+
+# Register SGLang-specific encoders with the shared system
+@register_encoder(Config)
+def _preprocess_for_encode_config(
+    config: Config,
+) -> Dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    return {
+        "server_args": config.server_args,
+        "dynamo_args": config.dynamo_args,
+        "serving_mode": config.serving_mode.value
+        if config.serving_mode is not None
+        else "None",
+    }
 
 
 def _set_parser(
@@ -231,6 +253,7 @@ def parse_args(args: list[str]) -> Config:
         reasoning_parser=reasoning_parser,
         custom_jinja_template=expanded_template_path,
         use_sglang_tokenizer=parsed_args.use_sglang_tokenizer,
+        dump_config_to=parsed_args.dump_config_to,
     )
     logging.debug(f"Dynamo args: {dynamo_args}")
 

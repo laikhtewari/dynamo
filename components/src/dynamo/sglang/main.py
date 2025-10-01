@@ -11,6 +11,7 @@ import sglang as sgl
 import uvloop
 from sglang.srt.utils import get_ip
 
+from dynamo.common.config_dump import dump_config
 from dynamo.llm import ZmqKvEventPublisher, ZmqKvEventPublisherConfig
 from dynamo.runtime import DistributedRuntime, dynamo_worker
 from dynamo.runtime.logging import configure_dynamo_logging
@@ -39,6 +40,7 @@ async def worker(runtime: DistributedRuntime):
     logging.info("Signal handlers will trigger a graceful shutdown of the runtime")
 
     config = parse_args(sys.argv[1:])
+    dump_config(config.dynamo_args.dump_config_to, config)
     if config.serving_mode != DisaggregationMode.PREFILL:
         await init(runtime, config)
     else:
